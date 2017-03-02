@@ -96,10 +96,14 @@ public class Executor {
         A4Options a4Options = new A4Options();
         a4Options.solver = A4Options.SatSolver.SAT4J;
 
-        Sig.PrimSig FSObject = new Sig.PrimSig("FSObject");
+        Sig.PrimSig FSObject = new Sig.PrimSig("FSObj");
         Sig.PrimSig Dir = new Sig.PrimSig("Dir", FSObject);
         Expr parent = FSObject.addField("parent", Dir);
         Expr contents = Dir.addField("contents", FSObject.typecheck_as_set());
         System.out.println();
     }
+
+//    private static void createKodKodModel() {
+//        Formula
+//    }
 }
