@@ -1,200 +1,78 @@
 package filesystem;
 
-import kodkod.ast.Expression;
 import kodkod.ast.Formula;
 import kodkod.ast.Relation;
 import kodkod.ast.Variable;
 import kodkod.engine.Solution;
 import kodkod.engine.Solver;
-import kodkod.engine.fol2sat.HigherOrderDeclException;
-import kodkod.engine.fol2sat.UnboundLeafException;
 import kodkod.engine.satlab.SATFactory;
 import kodkod.instance.Bounds;
 import kodkod.instance.TupleFactory;
 import kodkod.instance.Universe;
+import kodkod.util.nodes.PrettyPrinter;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Arrays;
 
 public class FileSystem {
+    private final Relation file;
+    private final Relation dir;
+    private final Relation root;
+    private final Relation contents;
 
-    private final Relation Obj, Name, File, Dir, Root, Cur, DirEntry;
-    private final Relation entries, parent, name, contents;
+    private static final String DIR0 = "dir0";
+    private static final String DIR1 = "dir1";
+    private static final String FILE0 = "file0";
+    private static final String FILE1 = "file1";
+    private static final String FILE2 = "file2";
 
-    /**
-     * Constructs a new instance of the file system problem.
-     */
     public FileSystem() {
-        Obj = Relation.unary("Object");
-        Name = Relation.unary("Name");
-        File = Relation.unary("File");
-        Dir = Relation.unary("Dir");
-        Root = Relation.unary("Root");
-        Cur = Relation.unary("Cur");
-        DirEntry = Relation.unary("DirEntry");
-        entries = Relation.binary("entries");
-        parent = Relation.binary("parent");
-        name = Relation.binary("name");
-        contents = Relation.binary("contents");
+        this.file = Relation.unary("File");
+        this.dir = Relation.unary("Dir");
+        this.root = Relation.unary("Root");
+        this.contents = Relation.binary("contents");
     }
 
-    /**
-     * Returns the declaration constraints.
-     * @return declaration constraints
-     */
-    public final Formula decls() {
-        // File and Dir partition object
-        final Formula f0 = Obj.eq(File.union(Dir)).and(File.intersection(Dir).no());
-        // Root and Cur are in Dir and do not intersect
-        final Formula f1 = Root.in(Dir).and(Cur.in(Dir)).and(Root.intersection(Cur).no());
-        // don't need to specify that Dir, Name, and DirEntry are disjoint; implied by bounds
-        final Formula f2 = entries.in(Dir.product(DirEntry));
-        final Formula f3 = parent.partialFunction(Dir, Dir);
-        final Formula f4 = name.function(DirEntry, Name);
-        final Formula f5 = contents.function(DirEntry, Obj);
-        return f0.and(f1).and(f2).and(f3).and(f4).and(f5);
+    public Formula defineConstraints() {
+        Formula fileSystemContent = contents.in(dir.product((dir.union(file))));
+
+        final Variable parent = Variable.unary("parent");
+        Formula singleParent = parent.in(parent.join(contents.closure())).not().forAll(parent.oneOf(dir));
+
+        Formula rootDir = root.in(dir);
+
+        Formula correctPath = file.union(dir).in(root.join(contents.reflexiveClosure()));
+
+        return Formula.and(Arrays.asList(fileSystemContent, singleParent, rootDir, correctPath));
     }
 
-    /**
-     * Returns all facts in the model.
-     * @return the facts.
-     */
-    public final Formula facts() {
-        // sig File extends Object {} { some d: Dir | this in d.entries.contents }
-        final Variable file = Variable.unary("this");
-        final Variable d = Variable.unary("d");
-        final Formula f0 = file.in(d.join(entries).join(contents)).forSome(d.oneOf(Dir)).forAll(file.oneOf(File));
+    public Bounds defineBounds() {
+        final Universe universe = new Universe(DIR0, DIR1, FILE0, FILE1, FILE2);
+        final Bounds bounds = new Bounds(universe);
+        final TupleFactory tupleFactory = universe.factory();
 
-//		sig Dir extends Object {
-//			  entries: set DirEntry,
-//			  parent: lone Dir
-//			} {
-//			  parent = this.~@contents.~@entries
-//			  all e1, e2 : entries | e1.name = e2.name => e1 = e2
-//			  this !in this.^@parent
-//			  this != Root => Root in this.^@parent
-//			}
-
-        final Variable dir = Variable.unary("this");
-        final Variable e1 = Variable.unary("e1"), e2 = Variable.unary("e2");
-
-        final Formula f1 = (dir.join(parent)).eq(dir.join(contents.transpose()).join(entries.transpose()));
-        final Expression e0 = dir.join(entries);
-        final Formula f2 = e1.join(name).eq(e2.join(name)).implies(e1.eq(e2)).forAll(e1.oneOf(e0).and(e2.oneOf(e0)));
-        final Formula f3 = dir.in(dir.join(parent.closure())).not();
-        final Formula f4 = dir.eq(Root).not().implies(Root.in(dir.join(parent.closure())));
-        final Formula f5 = f1.and(f2).and(f3).and(f4).forAll(dir.oneOf(Dir));
-
-//		one sig Root extends Dir {} { no parent }
-        final Formula f6 = Root.join(parent).no();
-
-//		sig DirEntry {
-//			  name: Name,
-//			  contents: Object
-//			} { one this.~entries }
-
-        final Variable entry = Variable.unary("this");
-        final Formula f7 = entry.join(entries.transpose()).one().forAll(entry.oneOf(DirEntry));
-
-//		fact OneParent {
-//		    // all directories besides root xhave one parent
-//		    all d: Dir - Root | one d.parent
-//		}
-
-        final Formula f8 = d.join(parent).one().forAll(d.oneOf(Dir.difference(Root)));
-
-        return f0.and(f5).and(f6).and(f7).and(f8);
-    }
-
-    /**
-     * Returns the no aliases assertion.
-     * @return the no aliases assertion.
-     */
-    public final Formula noDirAliases() {
-        //all o: Dir | lone o.~contents
-        final Variable o = Variable.unary("o");
-        return o.join(contents.transpose()).lone().forAll(o.oneOf(Dir));
-    }
-
-    /**
-     * Returns the formula that 'checks' the noDirAliases assertion.
-     * @return decls() and facts() and noDirAliases().not()
-     */
-    public final Formula checkNoDirAliases() {
-        return decls().and(facts()).and(noDirAliases().not());
-    }
-
-    /**
-     * Returns the bounds for the given scope.
-     * @return the bounds for the given scope.
-     */
-    public final Bounds bounds(int scope) {
-        assert scope > 0;
-        final int n = scope*3;
-        final List<String> atoms = new ArrayList<>(n);
-        for(int i = 0; i < scope; i++)
-            atoms.add("Object"+i);
-        for(int i = 0; i < scope; i++)
-            atoms.add("Name"+i);
-        for(int i = 0; i < scope; i++)
-            atoms.add("DirEntry"+i);
-
-        final Universe u = new Universe(atoms);
-        final TupleFactory tupleFactory = u.factory();
-        final Bounds bounds = new Bounds(u);
-
-        final int max = scope-1;
-
-        bounds.bound(Obj, tupleFactory.range(tupleFactory.tuple("Object0"), tupleFactory.tuple("Object"+max)));
-        bounds.boundExactly(Root, tupleFactory.setOf("Object0"));
-        bounds.bound(Cur, bounds.upperBound(Obj));
-        bounds.bound(File, bounds.upperBound(Obj));
-        bounds.bound(Dir, bounds.upperBound(Obj));
-        bounds.bound(Name, tupleFactory.range(tupleFactory.tuple("Name0"), tupleFactory.tuple("Name"+max)));
-        bounds.bound(DirEntry, tupleFactory.range(tupleFactory.tuple("DirEntry0"), tupleFactory.tuple("DirEntry"+max)));
-
-        bounds.bound(entries, bounds.upperBound(Dir).product(bounds.upperBound(DirEntry)));
-        bounds.bound(parent, bounds.upperBound(Dir).product(bounds.upperBound(Dir)));
-        bounds.bound(name, bounds.upperBound(DirEntry).product(bounds.upperBound(Name)));
-        bounds.bound(contents, bounds.upperBound(DirEntry).product(bounds.upperBound(Obj)));
+        bounds.boundExactly(root, tupleFactory.setOf(DIR0));
+        bounds.bound(dir, tupleFactory.setOf(DIR0, DIR1));
+        bounds.bound(file, tupleFactory.setOf(FILE0, FILE1, FILE2));
+        bounds.bound(contents, tupleFactory.setOf(tupleFactory.tuple(DIR0, DIR1)),
+                bounds.upperBound(dir).product(tupleFactory.allOf(1)));
 
         return bounds;
     }
 
-    private static void usage() {
-        System.out.println("java examples.FileSystem [scope]");
-        System.exit(1);
-    }
+    public static void main(String[] args) {
+        final FileSystem fileSys = new FileSystem();
+        final Formula constraints = fileSys.defineConstraints();
 
-    /**
-     * Usage: java examples.alloy.FileSystem [scope]
-     */
-    public  static void main(String[] args) {
-        args = new String[100];
-        if (args.length < 1)
-            usage();
-        try {
-            final int n = Integer.parseInt("3");
-            final FileSystem model = new FileSystem();
-            final Formula f = model.checkNoDirAliases();
-            System.out.println(f);
-            final Bounds b = model.bounds(n);
-            final Solver solver = new Solver();
-            solver.options().setSolver(SATFactory.MiniSat);
+        System.out.println(PrettyPrinter.print(constraints, 2));
 
-            final Solution s = solver.solve(f, b);
-            System.out.println(s);
+        final Bounds bounds = fileSys.defineBounds();
+        final Solver solver = new Solver();
 
+        solver.options().setSolver(SATFactory.DefaultSAT4J);
 
-        } catch (NumberFormatException nfe) {
-            usage();
-        } catch (HigherOrderDeclException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        } catch (UnboundLeafException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        }
+        final Solution solution = solver.solve(constraints, bounds);
+
+        System.out.println(solution);
     }
 
 }

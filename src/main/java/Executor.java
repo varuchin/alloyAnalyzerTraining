@@ -98,12 +98,11 @@ public class Executor {
 
         Sig.PrimSig FSObject = new Sig.PrimSig("FSObj");
         Sig.PrimSig Dir = new Sig.PrimSig("Dir", FSObject);
-        Expr parent = FSObject.addField("parent", Dir);
-        Expr contents = Dir.addField("contents", FSObject.typecheck_as_set());
+        Sig.PrimSig File = new Sig.PrimSig("File", FSObject);
+
+        Expr parent = FSObject.addField("parent", Dir.lone_arrow_lone(Dir));
+        Expr contents = Dir.addField("contents", FSObject.setOf());
+
         System.out.println();
     }
-
-//    private static void createKodKodModel() {
-//        Formula
-//    }
 }
